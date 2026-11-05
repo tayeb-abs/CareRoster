@@ -1,17 +1,36 @@
 {
-  "name": "2aae31fa-a453-481e-ad59-c25a96d779dc",
+  "name": "tayebapp",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/lib/scheduling/engine.test.ts src/lib/password.test.ts src/lib/i18n.test.ts src/lib/print-export.test.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:migrate": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
+    "@fullcalendar/react": "^7.1.4",
+    "@prisma/client": "^6.19.0",
+    "@tailwindcss/postcss": "^4.1.17",
+    "dotenv": "^18.0.9",
+    "exceljs": "^4.4.0",
+    "jose": "^6.2.15",
+    "lucide-react": "^1.67.0",
     "next": "16.4.4",
+    "next-auth": "^5.0.0-beta.32",
+    "pptxgenjs": "^4.0.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "tailwindcss": "^4.1.17",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -19,6 +38,11 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.4",
+    "prisma": "^6.19.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
+  },
+  "overrides": {
+    "image-size": "2.0.4"
   }
 }

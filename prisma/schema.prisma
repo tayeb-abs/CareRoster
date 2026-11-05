@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  HEAD_NURSE
+}
+
+enum NurseLevel {
+  SENIOR
+  REGULAR
+}
+
+enum ShiftType {
+  WORK
+  OFF
+  SICK
+  EMERGENCY
+}
+
+enum OverrideReason {
+  SATURDAY_OFF
+  CONSECUTIVE_OFF
+  FRIDAY_COVERAGE
+  CONSECUTIVE_FRIDAY
+  FORCED_WORK
+  SICK_LEAVE
+  EMERGENCY_LEAVE
+  OTHER
+}
+
+enum ExceptionType {
+  SICK
+  EMERGENCY
+  OTHER
+}
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      RoleName @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+}
+
+model User {
+  id                String                    @id @default(uuid()) @db.Uuid
+  username          String                    @unique @db.VarChar(80)
+  name              String                    @db.VarChar(120)
+  email             String                    @unique @db.VarChar(255)
+  passwordHash      String                    @db.VarChar(255)
+  roleId            String                    @db.Uuid
+  isActive          Boolean                   @default(true)
+  createdById       String?                   @db.Uuid
+  updatedById       String?                   @db.Uuid
+  createdAt         DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime                  @updatedAt @db.Timestamptz(6)
+  role              Role                      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  createdBy         User?                     @relation("UserCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy         User?                     @relation("UserUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdUsers      User[]                    @relation("UserCreatedBy")
+  updatedUsers      User[]                    @relation("UserUpdatedBy")
+  nursesCreated     Nurse[]                   @relation("NurseCreatedBy")
+  nursesUpdated     Nurse[]                   @relation("NurseUpdatedBy")
+  periodsCreated    MonthlySchedule[]         @relation("MonthlyScheduleCreatedBy")
+  schedulesCreated  Schedule[]                @relation("ScheduleCreatedBy")
+  schedulesUpdated  Schedule[]                @relation("ScheduleUpdatedBy")
+  exceptionsCreated ScheduleException[]       @relation("ExceptionCreatedBy")
+  overridesCreated  ManualOverride[]          @relation("OverrideCreatedBy")
+  auditLogs         ScheduleAuditLog[]
+  fridayHistory     FridayAssignmentHistory[] @relation("FridayHistoryCreatedBy")
+  clinicProfilesUpdated ClinicProfile[]       @relation("ClinicProfileUpdatedBy")
+
+  @@index([roleId, isActive])
+  @@index([isActive, name])
+}
+
+model ClinicProfile {
+  id              String   @id @default("default") @db.VarChar(32)
+  clinicNameEn    String   @default("Evercare Medical Center") @db.VarChar(160)
+  clinicNameAr    String   @default("مركز إيفركير الطبي") @db.VarChar(160)
+  logoDataUrl     String?  @db.Text
+  address         String?  @db.VarChar(300)
+  phoneNumber     String?  @db.VarChar(40)
+  departmentName  String?  @db.VarChar(120)
+  headNurseName   String?  @db.VarChar(120)
+  updatedById     String?  @db.Uuid
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+  updatedBy       User?    @relation("ClinicProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById, updatedAt])
+}
+
+model Nurse {
+  id            String                    @id @default(uuid()) @db.Uuid
+  name          String                    @db.VarChar(120)
+  email         String?                   @unique @db.VarChar(255)
+  title         String                    @default("Registered Nurse") @db.VarChar(80)
+  level         NurseLevel                @default(REGULAR)
+  color         String                    @default("#2c9c84") @db.VarChar(7)
+  isActive      Boolean                   @default(true)
+  deletedAt     DateTime?                 @db.Timestamptz(6)
+  createdById   String?                   @db.Uuid
+  updatedById   String?                   @db.Uuid
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime                  @updatedAt @db.Timestamptz(6)
+  createdBy     User?                     @relation("NurseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?                     @relation("NurseUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  schedules     Schedule[]
+  exceptions    ScheduleException[]
+  overrides     ManualOverride[]
+  auditLogs     ScheduleAuditLog[]
+  fridayHistory FridayAssignmentHistory[]
+
+  @@index([isActive, name])
+  @@index([createdById])
+}
+
+model MonthlySchedule {
+  id            String                    @id @default(uuid()) @db.Uuid
+  year          Int
+  month         Int
+  generatedAt   DateTime                  @default(now()) @db.Timestamptz(6)
+  createdById   String?                   @db.Uuid
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime                  @updatedAt @db.Timestamptz(6)
+  createdBy     User?                     @relation("MonthlyScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  schedules     Schedule[]
+  exceptions    ScheduleException[]
+  overrides     ManualOverride[]
+  auditLogs     ScheduleAuditLog[]
+  fridayHistory FridayAssignmentHistory[]
+
+  @@unique([year, month])
+  @@index([year, month])
+  @@index([createdById, generatedAt])
+}
+
+model Schedule {
+  id                String             @id @default(uuid()) @db.Uuid
+  monthlyScheduleId String             @db.Uuid
+  nurseId           String             @db.Uuid
+  date              DateTime           @db.Date
+  shiftType         ShiftType
+  isManual          Boolean            @default(false)
+  exceptionApproved Boolean            @default(false)
+  seniorFridayOverrideApproved Boolean @default(false)
+  overrideReason    OverrideReason?
+  note              String?            @db.VarChar(500)
+  createdById       String?            @db.Uuid
+  updatedById       String?            @db.Uuid
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+  monthlySchedule   MonthlySchedule    @relation(fields: [monthlyScheduleId], references: [id], onDelete: Cascade)
+  nurse             Nurse              @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+  createdBy         User?              @relation("ScheduleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy         User?              @relation("ScheduleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  exception         ScheduleException?
+  overrides         ManualOverride[]
+  auditLogs         ScheduleAuditLog[]
+
+  @@unique([nurseId, date])
+  @@index([nurseId])
+  @@index([date])
+  @@index([monthlyScheduleId, date])
+  @@index([date, shiftType])
+  @@index([nurseId, date, shiftType])
+}
+
+model ScheduleException {
+  id                String          @id @default(uuid()) @db.Uuid
+  scheduleId        String          @unique @db.Uuid
+  monthlyScheduleId String          @db.Uuid
+  nurseId           String          @db.Uuid
+  date              DateTime        @db.Date
+  type              ExceptionType
+  note              String?         @db.VarChar(500)
+  createdById       String?         @db.Uuid
+  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
+  schedule          Schedule        @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  monthlySchedule   MonthlySchedule @relation(fields: [monthlyScheduleId], references: [id], onDelete: Cascade)
+  nurse             Nurse           @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+  createdBy         User?           @relation("ExceptionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([nurseId])
+  @@index([date])
+  @@index([monthlyScheduleId, date])
+  @@index([type, date])
+}
+
+model ManualOverride {
+  id                String          @id @default(uuid()) @db.Uuid
+  scheduleId        String          @db.Uuid
+  monthlyScheduleId String          @db.Uuid
+  nurseId           String          @db.Uuid
+  date              DateTime        @db.Date
+  previousShiftType ShiftType?
+  shiftType         ShiftType
+  reason            OverrideReason
+  note              String?         @db.VarChar(500)
+  createdById       String?         @db.Uuid
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
+  schedule          Schedule        @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  monthlySchedule   MonthlySchedule @relation(fields: [monthlyScheduleId], references: [id], onDelete: Cascade)
+  nurse             Nurse           @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+  createdBy         User?           @relation("OverrideCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([nurseId])
+  @@index([date])
+  @@index([scheduleId, isActive])
+  @@index([monthlyScheduleId, date])
+  @@index([createdById, createdAt])
+}
+
+model ScheduleAuditLog {
+  id                String           @id @default(uuid()) @db.Uuid
+  monthlyScheduleId String?          @db.Uuid
+  scheduleId        String?          @db.Uuid
+  nurseId           String?          @db.Uuid
+  date              DateTime?        @db.Date
+  actorId           String?          @db.Uuid
+  action            String           @db.VarChar(80)
+  oldValue          Json?
+  newValue          Json?
+  createdAt         DateTime         @default(now()) @db.Timestamptz(6)
+  monthlySchedule   MonthlySchedule? @relation(fields: [monthlyScheduleId], references: [id], onDelete: SetNull)
+  schedule          Schedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  nurse             Nurse?           @relation(fields: [nurseId], references: [id], onDelete: SetNull)
+  actor             User?            @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([nurseId])
+  @@index([date])
+  @@index([monthlyScheduleId, createdAt])
+  @@index([scheduleId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+model FridayAssignmentHistory {
+  id                String           @id @default(uuid()) @db.Uuid
+  monthlyScheduleId String?          @db.Uuid
+  nurseId           String           @db.Uuid
+  date              DateTime         @db.Date
+  assigned          Boolean          @default(true)
+  createdById       String?          @db.Uuid
+  createdAt         DateTime         @default(now()) @db.Timestamptz(6)
+  monthlySchedule   MonthlySchedule? @relation(fields: [monthlyScheduleId], references: [id], onDelete: SetNull)
+  nurse             Nurse            @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+  createdBy         User?            @relation("FridayHistoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([nurseId, date])
+  @@index([nurseId])
+  @@index([date])
+  @@index([date, assigned])
+  @@index([monthlyScheduleId, date])
+}
