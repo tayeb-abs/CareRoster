@@ -4,6 +4,9 @@ import { useState } from "react";
 import { CalendarClock, X } from "lucide-react";
 import type { Assignment, Nurse } from "@/lib/client-api";
 import { saveScheduleChange } from "@/lib/schedule-actions";
+import { saveAssignmentShifts } from "@/lib/schedule-actions";
+import { formatShiftTime } from "@/lib/shifts";
+import type { ShiftTemplate } from "@/lib/client-api";
 import { LocalizedContent, useLocale } from "@/components/locale-provider";
 
 const reasons = [
@@ -23,6 +26,7 @@ export function ScheduleEditor({
   date,
   year,
   month,
+  shifts = [],
   onClose,
   onSaved,
 }: {
@@ -31,6 +35,7 @@ export function ScheduleEditor({
   date: string;
   year: number;
   month: number;
+  shifts?: ShiftTemplate[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -38,19 +43,33 @@ export function ScheduleEditor({
   const [type, setType] = useState<Assignment["type"]>(assignment?.type ?? "WORK");
   const [reason, setReason] = useState(assignment?.overrideReason ?? "OTHER");
   const [note, setNote] = useState(assignment?.note ?? "");
+  const [shiftId, setShiftId] = useState(
+    assignment?.shiftAssignments?.[0]?.shiftTemplateId ?? shifts.find((shift) => shift.isDefault)?.id ?? "",
+  );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const submit = async (clearOverride = false) => {
     if (!assignment && !nurse) return;
     const nurseId = assignment?.nurseId ?? nurse!.id;
+    if (type === "WORK" && !shiftId) {
+      setError("Create or select an active shift before assigning work.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
+      if (!clearOverride && type === "WORK" && assignment?.type === "WORK") {
+        await saveAssignmentShifts(nurseId, date, [shiftId]);
+        onSaved();
+        onClose();
+        return;
+      }
       const result = await saveScheduleChange(year, month, {
         nurseId,
         date,
         type,
+        ...(type === "WORK" ? { shiftId } : {}),
         overrideReason: reason,
         note,
         clearOverride,
@@ -74,13 +93,14 @@ export function ScheduleEditor({
         <span className="dialog-kicker"><CalendarClock size={14} /> SCHEDULE OVERRIDE</span>
         <h2>{label}</h2>
         <p>{new Intl.DateTimeFormat(language, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))}</p>
-        <label className="field-label">Shift assignment<select value={type} onChange={(event) => setType(event.target.value as Assignment["type"])}><option value="WORK">Working · 10 hours</option><option value="OFF">Day off</option><option value="SICK">Sick leave</option><option value="EMERGENCY">Emergency leave</option></select></label>
+        <label className="field-label">Assignment type<select value={type} onChange={(event) => setType(event.target.value as Assignment["type"])}><option value="WORK">Working shift</option><option value="OFF">Day off</option><option value="SICK">Sick leave</option><option value="EMERGENCY">Emergency leave</option></select></label>
+        {type === "WORK" && <label className="field-label">Administrator-defined shift<select required value={shiftId} onChange={(event) => setShiftId(event.target.value)}><option value="">Select a shift</option>{shifts.filter((shift) => shift.isActive).map((shift) => <option key={shift.id} value={shift.id}>{shift.name} · {formatShiftTime(shift.startTime, language)}–{formatShiftTime(shift.endTime, language)} · {shift.totalHours}h</option>)}</select></label>}
         <label className="field-label">Reason for override<select value={reason} onChange={(event) => setReason(event.target.value)}>{reasons.map(([value, labelText]) => <option key={value} value={value}>{labelText}</option>)}</select></label>
         <label className="field-label">Note <span className="field-optional">OPTIONAL</span><textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} placeholder="Add context for the team…" /></label>
         {error && <p className="form-error">{error}</p>}
         <div className="dialog-actions dialog-actions-spread">
           {assignment?.isManual ? <button className="button button-text-danger" disabled={saving} onClick={() => void submit(true)}>Reset to automatic</button> : <span />}
-          <div className="dialog-action-group"><button className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving} onClick={() => void submit()}>{saving ? "Rebalancing…" : "Save override"}</button></div>
+          <div className="dialog-action-group"><button className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving} onClick={() => void submit()}>{saving ? "Saving…" : "Save assignment"}</button></div>
         </div>
       </section>
     </div></LocalizedContent>

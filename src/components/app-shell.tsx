@@ -9,6 +9,7 @@ import {
   ChartNoAxesCombined,
   ChevronDown,
   ClipboardList,
+  Clock3,
   HeartPulse,
   LayoutDashboard,
   LogOut,
@@ -33,6 +34,7 @@ const navigation = [
   { href: "/exceptions", label: "Schedule exceptions", icon: ClipboardList },
   { href: "/reports", label: "Reports & statistics", icon: ChartNoAxesCombined },
   { href: "/settings/clinic", label: "Clinic profile", icon: Building2 },
+  { href: "/settings/shifts", label: "Shift management", icon: Clock3 },
 ];
 
 const titleByPath: Record<string, { heading: string; caption: string }> = {
@@ -43,6 +45,7 @@ const titleByPath: Record<string, { heading: string; caption: string }> = {
   "/exceptions": { heading: "Schedule exceptions", caption: "Record leave and one-off schedule changes." },
   "/reports": { heading: "Reports & statistics", caption: "Understand workload and fairness across your team." },
   "/settings/clinic": { heading: "Clinic profile", caption: "Manage the clinic identity used in official reports and exports." },
+  "/settings/shifts": { heading: "Shift management", caption: "Define shift templates and working hours for your clinic." },
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -97,7 +100,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <p className="nav-label">{translateText("WORKSPACE", language)}</p>
         <nav className="side-nav">
-          {navigation.filter(({ href }) => href !== "/settings/clinic" || user.role === "ADMIN").map(({ href, label, icon: Icon }) => (
+          {navigation.filter(({ href }) => !["/settings/clinic", "/settings/shifts"].includes(href) || user.role === "ADMIN").map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}

@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { SessionProvider } from "@/components/session-provider";
 import { LocaleProvider } from "@/components/locale-provider";
 import "./globals.css";
-import "@fullcalendar/react/skeleton.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

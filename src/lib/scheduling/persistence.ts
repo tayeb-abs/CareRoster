@@ -95,6 +95,7 @@ export async function saveMonthlySchedule(
           date,
           shiftType: assignment.type as ShiftType,
           isManual: assignment.isManual,
+          isShiftManual: assignment.isShiftManual ?? false,
           exceptionApproved: assignment.exceptionApproved ?? false,
           seniorFridayOverrideApproved: assignment.seniorFridayOverrideApproved ?? false,
           overrideReason: (assignment.overrideReason ?? null) as OverrideReason | null,
@@ -106,6 +107,7 @@ export async function saveMonthlySchedule(
           monthlyScheduleId: period.id,
           shiftType: assignment.type as ShiftType,
           isManual: assignment.isManual,
+          isShiftManual: assignment.isShiftManual ?? false,
           exceptionApproved: assignment.exceptionApproved ?? false,
           seniorFridayOverrideApproved: assignment.seniorFridayOverrideApproved ?? false,
           overrideReason: (assignment.overrideReason ?? null) as OverrideReason | null,
@@ -114,6 +116,22 @@ export async function saveMonthlySchedule(
         },
       });
       saved.push(row);
+
+      await transaction.scheduleShift.deleteMany({ where: { scheduleId: row.id } });
+      if (assignment.type === "WORK" && assignment.shiftAssignments?.length) {
+        await transaction.scheduleShift.createMany({
+          data: assignment.shiftAssignments.map((shift) => ({
+            scheduleId: row.id,
+            shiftTemplateId: shift.shiftTemplateId,
+            shiftName: shift.shiftName,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            color: shift.color,
+            totalHours: shift.totalHours,
+            createdById: actorId,
+          })),
+        });
+      }
 
       const changed =
         !previous ||
@@ -290,8 +308,11 @@ export async function saveMonthlySchedule(
 
     return transaction.schedule.findMany({
       where: { date: { gte: start, lte: end } },
-      include: { nurse: { select: { id: true, name: true, color: true, isActive: true, level: true } } },
-      orderBy: [{ date: "asc" }, { nurse: { name: "asc" } }],
+      include: {
+        nurse: { select: { id: true, name: true, color: true, isActive: true, level: true, sortOrder: true } },
+        shiftAssignments: true,
+      },
+      orderBy: [{ date: "asc" }, { nurse: { sortOrder: "asc" } }],
     });
   });
 }
@@ -302,8 +323,11 @@ export async function getMonthlySchedule(year: number, month: number) {
   const { start, end } = dateRange(year, month);
   const assignments = await db.schedule.findMany({
     where: { date: { gte: start, lte: end } },
-    include: { nurse: { select: { id: true, name: true, color: true, isActive: true, level: true } } },
-    orderBy: [{ date: "asc" }, { nurse: { name: "asc" } }],
+    include: {
+      nurse: { select: { id: true, name: true, color: true, isActive: true, level: true, sortOrder: true } },
+      shiftAssignments: true,
+    },
+    orderBy: [{ date: "asc" }, { nurse: { sortOrder: "asc" } }],
   });
   return {
     id: period.id,
@@ -324,6 +348,15 @@ export function toEngineAssignments(
     date: Date | string;
     type: string;
     isManual: boolean;
+    isShiftManual?: boolean;
+    shiftAssignments?: {
+      shiftTemplateId: string;
+      shiftName: string;
+      startTime: string;
+      endTime: string;
+      color: string | null;
+      totalHours: { toNumber(): number } | number | string;
+    }[];
     exceptionApproved?: boolean;
     seniorFridayOverrideApproved?: boolean;
     overrideReason?: string | null;
@@ -335,6 +368,15 @@ export function toEngineAssignments(
     date: typeof row.date === "string" ? row.date : dateString(row.date),
     type: row.type as Assignment["type"],
     isManual: row.isManual,
+    isShiftManual: row.isShiftManual ?? false,
+    shiftAssignments: (row.shiftAssignments ?? []).map((shift) => ({
+      shiftTemplateId: shift.shiftTemplateId,
+      shiftName: shift.shiftName,
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+      color: shift.color,
+      totalHours: typeof shift.totalHours === "object" ? shift.totalHours.toNumber() : Number(shift.totalHours),
+    })),
     exceptionApproved: row.exceptionApproved ?? false,
     seniorFridayOverrideApproved: row.seniorFridayOverrideApproved ?? false,
     overrideReason: (row.overrideReason ?? null) as Assignment["overrideReason"],

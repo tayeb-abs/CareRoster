@@ -10,6 +10,7 @@ import {
   toEngineAssignments,
 } from "@/lib/scheduling/persistence";
 import { validateSchedule } from "@/lib/scheduling/engine";
+import { shiftSnapshot } from "@/lib/shifts";
 
 const paramsSchema = z.object({
   year: z.coerce.number().int().min(2020).max(2100),
@@ -31,6 +32,7 @@ const overrideSchema = z.object({
     "OTHER",
   ]).default("OTHER"),
   note: z.string().max(500).optional().nullable(),
+  shiftId: z.uuid().optional(),
   moveFrom: z.iso.date().optional(),
   clearOverride: z.boolean().default(false),
   confirmed: z.boolean().default(false),
@@ -52,7 +54,7 @@ export async function GET(request: Request, context: RouteContext) {
     const { start, end } = dateRange(params.year, params.month);
     const [schedule, nurses, seniorFridayWarnings] = await Promise.all([
       getMonthlySchedule(params.year, params.month),
-      db.nurse.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" } }),
+      db.nurse.findMany({ where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] }),
       db.scheduleAuditLog.findMany({
         where: {
           date: { gte: start, lte: end },
@@ -86,15 +88,48 @@ export async function PUT(request: Request, context: RouteContext) {
   const params = await getPeriodParams(context);
   if (!params) return NextResponse.json({ error: "Invalid schedule month." }, { status: 400 });
   try {
+    const body = await request.json().catch(() => ({}));
+    const generationInput = z.object({ shiftId: z.uuid().optional() }).safeParse(body);
+    if (!generationInput.success) return NextResponse.json({ error: "Select a valid shift for schedule generation." }, { status: 400 });
     const current = await getMonthlySchedule(params.year, params.month);
-    const overrides = toEngineAssignments(current?.assignments.filter((row) => row.isManual) ?? []);
+    const overrides = toEngineAssignments(current?.assignments.filter((row) => row.isManual || row.isShiftManual) ?? []);
     const assignments = await buildMonthlySchedule(params.year, params.month, overrides);
+    const shift = generationInput.data.shiftId
+      ? await db.shiftTemplate.findFirst({ where: { id: generationInput.data.shiftId, isActive: true } })
+      : await db.shiftTemplate.findFirst({ where: { isDefault: true, isActive: true } });
+    if (!shift) {
+      return NextResponse.json({
+        error: generationInput.data.shiftId
+          ? "The selected shift is inactive or unavailable."
+          : "Create an active shift and select it as the default before generating a schedule.",
+      }, { status: 400 });
+    }
+    const previousByKey = new Map((current?.assignments ?? []).map((row) => [`${row.nurseId}|${row.date}`, row]));
+    const scheduledAssignments = assignments.map((assignment) => {
+      if (assignment.type !== "WORK") return assignment;
+      const previous = previousByKey.get(`${assignment.nurseId}|${assignment.date}`);
+      const retained = previous?.isShiftManual ? previous.shiftAssignments : null;
+      return {
+        ...assignment,
+        isShiftManual: Boolean(retained?.length),
+        shiftAssignments: retained?.length
+          ? retained.map((item) => ({
+              shiftTemplateId: item.shiftTemplateId,
+              shiftName: item.shiftName,
+              startTime: item.startTime,
+              endTime: item.endTime,
+              color: item.color,
+              totalHours: Number(item.totalHours),
+            }))
+          : [shiftSnapshot(shift)],
+      };
+    });
     const nurseLevels = new Map((await db.nurse.findMany({
-      where: { id: { in: [...new Set(assignments.map((assignment) => assignment.nurseId))] } },
+      where: { id: { in: [...new Set(scheduledAssignments.map((assignment) => assignment.nurseId))] } },
       select: { id: true, level: true },
     })).map((nurse) => [nurse.id, nurse.level]));
-    const violations = validateSchedule(assignments, nurseLevels);
-    const saved = await saveMonthlySchedule(params.year, params.month, assignments, user.id);
+    const violations = validateSchedule(scheduledAssignments, nurseLevels);
+    const saved = await saveMonthlySchedule(params.year, params.month, scheduledAssignments, user.id);
     return NextResponse.json({ schedule: saved, violations });
   } catch (error) {
     return apiError(error, "Generate monthly schedule");
@@ -136,7 +171,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       ? existing.find((row) => row.nurseId === input.nurseId && row.date === input.moveFrom)
       : undefined;
     const retained = existing.filter((row) => {
-      if (!row.isManual) return false;
+      if (!row.isManual && !row.isShiftManual) return false;
       if (row.nurseId !== input.nurseId) return true;
       return row.date !== input.date && row.date !== input.moveFrom;
     });
@@ -163,11 +198,56 @@ export async function PATCH(request: Request, context: RouteContext) {
       });
     }
     const assignments = await buildMonthlySchedule(params.year, params.month, overrides);
+    const shift = input.type === "WORK"
+      ? input.shiftId
+        ? await db.shiftTemplate.findFirst({ where: { id: input.shiftId, isActive: true } })
+        : await db.shiftTemplate.findFirst({ where: { isDefault: true, isActive: true } })
+      : null;
+    if (input.type === "WORK" && !shift) {
+      return NextResponse.json({
+        error: input.shiftId
+          ? "The selected shift is inactive or unavailable."
+          : "Choose an active shift before assigning this nurse to work.",
+      }, { status: 400 });
+    }
+    const [defaultShift] = await Promise.all([
+      db.shiftTemplate.findFirst({ where: { isDefault: true, isActive: true } }),
+    ]);
+    const fallbackShift = defaultShift ?? shift;
+    const priorByKey = new Map((current?.assignments ?? []).map((row) => [`${row.nurseId}|${row.date}`, row]));
+    const scheduledAssignments = assignments.map((assignment) => {
+      if (assignment.type !== "WORK") return assignment;
+      const isTarget = assignment.nurseId === input.nurseId && assignment.date === input.date;
+      const previous = priorByKey.get(`${assignment.nurseId}|${assignment.date}`);
+      if (isTarget && shift) {
+        return { ...assignment, isShiftManual: true, shiftAssignments: [shiftSnapshot(shift)] };
+      }
+      if (previous?.shiftAssignments.length && (previous.isShiftManual || previous.type === "WORK")) {
+        return {
+          ...assignment,
+          isShiftManual: previous.isShiftManual,
+          shiftAssignments: previous.shiftAssignments.map((item) => ({
+            shiftTemplateId: item.shiftTemplateId,
+            shiftName: item.shiftName,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            color: item.color,
+            totalHours: Number(item.totalHours),
+          })),
+        };
+      }
+      return fallbackShift
+        ? { ...assignment, isShiftManual: false, shiftAssignments: [shiftSnapshot(fallbackShift)] }
+        : assignment;
+    });
+    if (scheduledAssignments.some((assignment) => assignment.type === "WORK" && !assignment.shiftAssignments?.length)) {
+      return NextResponse.json({ error: "Set an active default shift before changing this schedule." }, { status: 400 });
+    }
     const nurseLevels = new Map((await db.nurse.findMany({
-      where: { id: { in: [...new Set(assignments.map((assignment) => assignment.nurseId))] } },
+      where: { id: { in: [...new Set(scheduledAssignments.map((assignment) => assignment.nurseId))] } },
       select: { id: true, level: true },
     })).map((entry) => [entry.id, entry.level]));
-    const violations = validateSchedule(assignments, nurseLevels);
+    const violations = validateSchedule(scheduledAssignments, nurseLevels);
     if (violations.length && !input.confirmed) {
       return NextResponse.json({ requiresConfirmation: true, violations }, { status: 409 });
     }
@@ -176,14 +256,14 @@ export async function PATCH(request: Request, context: RouteContext) {
       .filter((violation) => violation.rule === seniorPolicyRule)
       .map((violation) => violation.date));
     const assignmentsToSave = input.confirmed && acceptedSeniorDates.size
-      ? assignments.map((assignment) =>
+      ? scheduledAssignments.map((assignment) =>
         acceptedSeniorDates.has(assignment.date) &&
         assignment.type === "WORK" &&
         nurseLevels.get(assignment.nurseId) === "SENIOR"
           ? { ...assignment, isManual: true, seniorFridayOverrideApproved: true }
           : assignment,
       )
-      : assignments;
+      : scheduledAssignments;
     const saved = await saveMonthlySchedule(params.year, params.month, assignmentsToSave, user.id);
     return NextResponse.json({
       schedule: saved,

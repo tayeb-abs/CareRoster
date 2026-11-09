@@ -23,10 +23,13 @@ export async function GET(request: Request, context: RouteContext) {
     const [assignments, nurses, seniorFridayWarnings] = await Promise.all([
       db.schedule.findMany({
         where: { date: { gte: start, lte: end } },
-        include: { nurse: { select: { id: true, name: true, color: true, isActive: true, level: true } } },
-        orderBy: [{ date: "asc" }, { nurse: { name: "asc" } }],
+        include: {
+          nurse: { select: { id: true, name: true, color: true, isActive: true, level: true, sortOrder: true } },
+          shiftAssignments: true,
+        },
+        orderBy: [{ date: "asc" }, { nurse: { sortOrder: "asc" } }],
       }),
-      db.nurse.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" } }),
+      db.nurse.findMany({ where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] }),
       db.scheduleAuditLog.findMany({
         where: {
           date: { gte: start, lte: end },
@@ -44,6 +47,10 @@ export async function GET(request: Request, context: RouteContext) {
               ...row,
               date: dateString(row.date),
               type: row.shiftType,
+              shiftAssignments: row.shiftAssignments.map((shift) => ({
+                ...shift,
+                totalHours: Number(shift.totalHours),
+              })),
             })),
           }
         : null,

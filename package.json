@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/scheduling/engine.test.ts src/lib/password.test.ts src/lib/i18n.test.ts src/lib/print-export.test.ts",
+    "test": "tsx --test src/lib/scheduling/engine.test.ts src/lib/password.test.ts src/lib/i18n.test.ts src/lib/print-export.test.ts src/lib/shifts.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
@@ -17,7 +17,6 @@
     "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
-    "@fullcalendar/react": "^7.1.4",
     "@prisma/client": "^6.19.0",
     "@tailwindcss/postcss": "^4.1.17",
     "dotenv": "^18.0.9",

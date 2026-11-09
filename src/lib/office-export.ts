@@ -7,6 +7,7 @@ import {
   type ExportAssignment,
   type ExportFairnessRow,
   type ExportWarning,
+  type ExportScheduleDetail,
   type PaperOrientation,
 } from "@/lib/print-export";
 import {
@@ -15,8 +16,11 @@ import {
   defaultClinicBrand,
   generatedDate,
   type ClinicBrand,
+  type RosterNurseInput,
 } from "@/lib/roster-export";
+import { formatShiftTime } from "@/lib/shifts";
 import { monthName, translateText, type AppLanguage } from "@/lib/i18n";
+import type { ScheduleReportPeriod } from "@/lib/print-export";
 
 export type ExportFormat = "pdf" | "excel" | "word" | "powerpoint";
 export type ExportOptions = {
@@ -32,6 +36,8 @@ type ScheduleExportInput = ExportOptions & {
   startDate: string;
   endDate: string;
   assignments: ExportAssignment[];
+  nurses?: RosterNurseInput[];
+  period?: ScheduleReportPeriod;
   warnings: ExportWarning[];
 };
 
@@ -41,6 +47,7 @@ type ReportsExportInput = ExportOptions & {
   month: number;
   rows: ExportFairnessRow[];
   warnings: ExportWarning[];
+  assignments?: ExportAssignment[];
 };
 
 function downloadFile(filename: string, content: BlobPart, type: string) {
@@ -56,7 +63,7 @@ function downloadFile(filename: string, content: BlobPart, type: string) {
 
 function scheduleRows(input: ScheduleExportInput) {
   const { language, assignments } = input;
-  const roster = buildWeeklyRoster(assignments, input.startDate, language);
+  const roster = buildWeeklyRoster(assignments, input.startDate, language, input.endDate, input.nurses);
   const rows: (string | number)[][] = [
     [language === "ar" ? "الاسم" : "Nurse", ...roster.days.map((day) => day.label)],
     ...roster.nurses.map((nurse) => [
@@ -67,14 +74,30 @@ function scheduleRows(input: ScheduleExportInput) {
   return { roster, rows };
 }
 
+function scheduleTitle(input: ScheduleExportInput) {
+  return translateText(input.period === "monthly" ? "Monthly schedule" : "Weekly schedule", input.language);
+}
+
+function excelColumnName(column: number) {
+  let name = "";
+  let current = column;
+  while (current > 0) {
+    current -= 1;
+    name = String.fromCharCode(65 + current % 26) + name;
+    current = Math.floor(current / 26);
+  }
+  return name;
+}
+
 function reportRows(input: ReportsExportInput) {
   const { language, rows } = input;
   return [
-    ["Name", "Working days", "Friday assignments", "Senior Friday Assignments", "Regular Friday Assignments", "Off-days", "Leave"]
+    ["Name", "Working days", "Total hours", "Friday assignments", "Senior Friday Assignments", "Regular Friday Assignments", "Off-days", "Leave"]
       .map((item) => translateText(item, language)),
     ...rows.map((row) => [
       `${row.nurseLevel === "SENIOR" ? "⭐ " : ""}${row.nurseName}`,
       row.workingDays,
+      row.totalHours ?? 0,
       row.fridayAssignments,
       row.seniorFridayAssignments,
       row.regularFridayAssignments,
@@ -82,6 +105,39 @@ function reportRows(input: ReportsExportInput) {
       row.leaveDays,
     ]),
   ];
+}
+
+function reportAssignmentRows(input: ReportsExportInput): ExportScheduleDetail[] {
+  const { language } = input;
+  return (input.assignments ?? [])
+    .filter((assignment) => assignment.type === "WORK")
+    .flatMap((assignment) => assignment.shiftAssignments?.length
+      ? assignment.shiftAssignments.map((shift) => ({
+          date: assignment.date,
+          nurseName: assignment.nurseName,
+          shiftName: shift.shiftName,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          totalHours: Number(shift.totalHours),
+        }))
+      : [{
+          date: assignment.date,
+          nurseName: assignment.nurseName,
+          shiftName: translateText("Shift not assigned", language),
+          totalHours: 0,
+        }],
+    );
+}
+
+function shiftDetailRows(rows: ExportScheduleDetail[], language: AppLanguage) {
+  return rows.map((row) => [
+    new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${row.date}T00:00:00Z`)),
+    row.nurseName,
+    row.shiftName,
+    row.startTime ? formatShiftTime(row.startTime, language) : "—",
+    row.endTime ? formatShiftTime(row.endTime, language) : "—",
+    row.totalHours,
+  ]);
 }
 
 function dateRange(start: string, end: string, language: AppLanguage) {
@@ -119,7 +175,7 @@ function addWorkbookHeader(
   if (input.clinic.logoDataUrl) {
     const extension = input.clinic.logoDataUrl.startsWith("data:image/png;") ? "png" : "jpeg";
     const imageId = worksheet.workbook.addImage({ base64: input.clinic.logoDataUrl, extension });
-    worksheet.addImage(imageId, `${String.fromCharCode(65 + dataColumnCount)}1:${String.fromCharCode(65 + columnCount - 1)}4`);
+    worksheet.addImage(imageId, `${excelColumnName(dataColumnCount + 1)}1:${excelColumnName(columnCount)}4`);
   }
   worksheet.views = [{ rightToLeft: input.language === "ar", state: "frozen", ySplit: 4, xSplit: 2 }];
   worksheet.pageSetup = {
@@ -127,10 +183,12 @@ function addWorkbookHeader(
     orientation: input.orientation ?? "landscape",
     fitToPage: true,
     fitToWidth: 1,
-    fitToHeight: 1,
+    fitToHeight: 0,
+    printTitlesRow: "4:4",
     horizontalCentered: true,
     margins: { left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.15, footer: 0.15 },
   };
+  worksheet.headerFooter.oddFooter = `&LCareRoster&R${translateText("Page", input.language)} &P / &N`;
 }
 
 function applyRosterFormatting(worksheet: ExcelJS.Worksheet, input: ScheduleExportInput, startRow: number) {
@@ -142,7 +200,8 @@ function applyRosterFormatting(worksheet: ExcelJS.Worksheet, input: ScheduleExpo
     cell.font = { name: input.language === "ar" ? "Cairo" : "Arial", bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true, readingOrder: input.language === "ar" ? "rtl" : "ltr" };
     cell.border = { bottom: { style: "medium", color: { argb: "FF14577D" } } };
-    if (column === 8) cell.border = { ...cell.border, left: { style: "medium", color: { argb: "FF176B9A" } } };
+    const day = column > 1 ? roster.days[column - 2] : undefined;
+    if (day?.isFriday) cell.border = { ...cell.border, left: { style: "medium", color: { argb: "FF176B9A" } }, right: { style: "medium", color: { argb: "FF176B9A" } } };
   });
   roster.nurses.forEach((nurse, index) => {
     const row = worksheet.getRow(startRow + index + 1);
@@ -160,11 +219,10 @@ function applyRosterFormatting(worksheet: ExcelJS.Worksheet, input: ScheduleExpo
         cell.font = { ...cell.font, bold: true };
         cell.fill = excelFill(nurse.level === "SENIOR" ? "FFF2C9" : "E7F2F8");
       } else if (column > 1) {
-        const day = roster.days[column - 1];
+        const day = roster.days[column - 2];
         const shift = day ? nurse.shifts.get(day.date) : undefined;
         if (shift) {
-          cell.fill = excelFill(shift.isManual ? "EFE7F7" : shift.type === "WORK" ? "E2F1F8" : shift.type === "OFF" ? "F5F0E5" : shift.type === "SICK" ? "FDE9E8" : "FFF1D7");
-          if (shift.isManual) cell.border = { ...cell.border, top: { style: "medium", color: { argb: "FF8A65B3" } } };
+          cell.fill = excelFill(shift.type === "WORK" ? "E2F1F8" : shift.type === "OFF" ? "F5F0E5" : shift.type === "SICK" ? "FDE9E8" : "FFF1D7");
           if (shift.exceptionApproved) cell.font = { ...cell.font, bold: true, color: { argb: "FF815C16" } };
         }
         if (day?.isFriday) cell.border = { ...cell.border, left: { style: "medium", color: { argb: "FF176B9A" } }, right: { style: "medium", color: { argb: "FF176B9A" } } };
@@ -177,8 +235,9 @@ async function downloadExcelSchedule(input: ScheduleExportInput) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = input.generatedBy ?? "CareRoster";
   workbook.created = new Date(input.generatedAt ?? Date.now());
-  workbook.subject = translateText("Weekly schedule", input.language);
-  const worksheet = workbook.addWorksheet(translateText("Weekly schedule", input.language).slice(0, 31));
+  const title = scheduleTitle(input);
+  workbook.subject = title;
+  const worksheet = workbook.addWorksheet(title.slice(0, 31));
   const { roster, rows } = scheduleRows(input);
   worksheet.columns = [
     { width: 25 },
@@ -189,7 +248,7 @@ async function downloadExcelSchedule(input: ScheduleExportInput) {
   addWorkbookHeader(worksheet, {
     language: input.language,
     clinic: input.clinic ?? defaultClinicBrand,
-    title: translateText("Weekly schedule", input.language),
+    title,
     range,
     generatedBy: input.generatedBy,
     generatedAt: input.generatedAt,
@@ -210,14 +269,14 @@ async function downloadExcelSchedule(input: ScheduleExportInput) {
     }
   }
   const buffer = await workbook.xlsx.writeBuffer();
-  downloadFile("weekly-schedule.xlsx", buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  downloadFile(`${input.period ?? "weekly"}-schedule.xlsx`, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
 
 async function downloadExcelReport(input: ReportsExportInput) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = input.generatedBy ?? "CareRoster";
   const worksheet = workbook.addWorksheet(translateText("Reports & statistics", input.language).slice(0, 31));
-  worksheet.columns = [{ width: 24 }, ...Array.from({ length: 6 }, () => ({ width: 18 })), { width: 14 }];
+  worksheet.columns = [{ width: 24 }, ...Array.from({ length: 6 }, () => ({ width: 18 })), { width: 14 }, { width: 16 }];
   const start = new Date(Date.UTC(input.year, input.month - 1, 1)).toISOString().slice(0, 10);
   const end = new Date(Date.UTC(input.year, input.month, 0)).toISOString().slice(0, 10);
   addWorkbookHeader(worksheet, {
@@ -240,6 +299,33 @@ async function downloadExcelReport(input: ReportsExportInput) {
   });
   for (let rowIndex = 5; rowIndex <= worksheet.rowCount; rowIndex += 1) {
     worksheet.getRow(rowIndex).eachCell((cell) => {
+      cell.border = { bottom: { style: "hair", color: { argb: "FFD5E0E7" } } };
+      cell.alignment = { vertical: "middle", wrapText: true };
+    });
+  }
+  const details = workbook.addWorksheet(translateText("Shift details", input.language).slice(0, 31));
+  details.columns = [{ width: 18 }, { width: 24 }, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }];
+  addWorkbookHeader(details, {
+    language: input.language,
+    clinic: input.clinic ?? defaultClinicBrand,
+    title: translateText("Assigned shifts and actual hours", input.language),
+    range: `${start} – ${end}`,
+    generatedBy: input.generatedBy,
+    generatedAt: input.generatedAt,
+    orientation: input.orientation,
+  });
+  const detailHeaders = ["Date", "Nurse", "Shift name", "Start time", "End time", "Total hours"].map((item) => translateText(item, input.language));
+  details.addRow(detailHeaders);
+  shiftDetailRows(reportAssignmentRows(input), input.language).forEach((row) => details.addRow(row));
+  const detailHeader = details.getRow(4);
+  detailHeader.height = 32;
+  detailHeader.eachCell((cell) => {
+    cell.fill = excelFill("176B9A");
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+  for (let rowIndex = 5; rowIndex <= details.rowCount; rowIndex += 1) {
+    details.getRow(rowIndex).eachCell((cell) => {
       cell.border = { bottom: { style: "hair", color: { argb: "FFD5E0E7" } } };
       cell.alignment = { vertical: "middle", wrapText: true };
     });
@@ -272,33 +358,38 @@ async function downloadPowerPointSchedule(input: ScheduleExportInput) {
   const pptxgen = (await import("pptxgenjs")).default;
   const pptx = new pptxgen();
   const orientation = input.orientation ?? "landscape";
+  const title = scheduleTitle(input);
   pptx.layout = orientation === "landscape" ? "LAYOUT_WIDE" : "LAYOUT_STANDARD";
   pptx.author = input.generatedBy ?? "CareRoster";
-  pptx.subject = translateText("Weekly schedule", input.language);
-  pptx.title = translateText("Weekly schedule", input.language);
+  pptx.subject = title;
+  pptx.title = title;
   pptx.theme = { headFontFace: input.language === "ar" ? "Cairo" : "Arial", bodyFontFace: input.language === "ar" ? "Cairo" : "Arial" };
   pptx.rtlMode = input.language === "ar";
-  const { roster, rows } = scheduleRows(input);
+  const { roster } = scheduleRows(input);
   const clinic = input.clinic ?? defaultClinicBrand;
-  const title = translateText("Weekly schedule", input.language);
   const range = dateRange(input.startDate, input.endDate, input.language);
-  const tableHeaders = rows[0] ?? [];
-  const rowValues = rows.slice(1);
-  const pageSize = 9;
-  for (let offset = 0; offset < Math.max(rowValues.length, 1); offset += pageSize) {
+  const dateGroups = Array.from({ length: Math.ceil(roster.days.length / 7) }, (_, index) => roster.days.slice(index * 7, index * 7 + 7));
+  const nurseGroups = Array.from({ length: Math.max(1, Math.ceil(roster.nurses.length / 9)) }, (_, index) => roster.nurses.slice(index * 9, index * 9 + 9));
+  const tableWidth = orientation === "landscape" ? 12.48 : 6.62;
+  for (const days of dateGroups) for (const nurses of nurseGroups) {
     const slide = pptx.addSlide();
     slide.background = { color: "FFFFFF" };
-    addPowerPointBrand(slide, { ...input, clinic, title, range, orientation });
-    const chunk = rowValues.slice(offset, offset + pageSize);
-    const cells = [tableHeaders, ...chunk].map((row, rowIndex) => row.map((value, columnIndex) => {
-      const nurse = rowIndex > 0 ? roster.nurses[offset + rowIndex - 1] : undefined;
-      const day = columnIndex >= 1 ? roster.days[columnIndex - 1] : undefined;
+    const pageStart = days[0]?.date ?? input.startDate;
+    const pageEnd = days[days.length - 1]?.date ?? input.endDate;
+    addPowerPointBrand(slide, { ...input, clinic, title, range: dateRange(pageStart, pageEnd, input.language), orientation });
+    const tableHeaders = [input.language === "ar" ? "الاسم" : "Nurse", ...days.map(({ label }) => label)];
+    const rows = nurses.map((nurse) => [
+      `${nurse.level === "SENIOR" ? "⭐ " : ""}${nurse.name}`,
+      ...days.map((day) => nurse.shifts.get(day.date)?.label ?? "—"),
+    ]);
+    const cells = [tableHeaders, ...rows].map((row, rowIndex) => row.map((value, columnIndex) => {
+      const nurse = rowIndex > 0 ? nurses[rowIndex - 1] : undefined;
+      const day = columnIndex >= 1 ? days[columnIndex - 1] : undefined;
       const shift = nurse && day ? nurse.shifts.get(day.date) : undefined;
       const fill = rowIndex === 0
         ? day?.isFriday ? "14577D" : "176B9A"
         : columnIndex === 0 && nurse?.level === "SENIOR" ? "FFF2C9"
-          : shift?.isManual ? "EFE7F7"
-            : shift?.type === "WORK" ? "E2F1F8"
+          : shift?.type === "WORK" ? "E2F1F8"
               : shift?.type === "OFF" ? "F5F0E5"
                 : shift?.type === "SICK" ? "FDE9E8"
                   : shift?.type === "EMERGENCY" ? "FFF1D7"
@@ -320,11 +411,11 @@ async function downloadPowerPointSchedule(input: ScheduleExportInput) {
       };
     }));
     slide.addTable(cells, {
-      x: orientation === "landscape" ? 0.42 : 0.3, y: 1.68, w: orientation === "landscape" ? 12.48 : 6.62, h: orientation === "landscape" ? 5.2 : 5.7,
+      x: orientation === "landscape" ? 0.42 : 0.3, y: 1.68, w: tableWidth, h: orientation === "landscape" ? 5.2 : 5.7,
       fontFace: input.language === "ar" ? "Cairo" : "Arial", fontSize: orientation === "landscape" ? 9 : 7,
       border: { type: "solid", color: "D5E0E7", pt: 0.5 },
       fill: { color: "FFFFFF" }, color: "263A49", margin: 0.06, rowH: 0.46, valign: "middle",
-      colW: orientation === "landscape" ? [1.65, ...Array.from({ length: 7 }, () => 1.55)] : [0.95, ...Array.from({ length: 7 }, () => 0.81)],
+      colW: [orientation === "landscape" ? 1.65 : 0.95, ...Array.from({ length: days.length }, () => (tableWidth - (orientation === "landscape" ? 1.65 : 0.95)) / Math.max(days.length, 1))],
     });
   }
   if (input.warnings.length) {
@@ -337,7 +428,7 @@ async function downloadPowerPointSchedule(input: ScheduleExportInput) {
       return `${translateText("HIGH PRIORITY", input.language)} · ${date}: ${translateText(warning.message, input.language)}`;
     }).join("\n\n"), { x: 0.4, y: 1.75, w: warningWidth, h: 5, fontFace: input.language === "ar" ? "Cairo" : "Arial", fontSize: orientation === "landscape" ? 16 : 10, color: "815C16", fill: { color: "FFF9E8" }, margin: 0.2, valign: "top", rtlMode: input.language === "ar" });
   }
-  await pptx.writeFile({ fileName: "weekly-schedule.pptx" });
+  await pptx.writeFile({ fileName: `${input.period ?? "weekly"}-schedule.pptx` });
 }
 
 async function downloadPowerPointReport(input: ReportsExportInput) {
@@ -369,6 +460,22 @@ async function downloadPowerPointReport(input: ReportsExportInput) {
     const portrait = input.orientation === "portrait";
     slide.addText(input.warnings.map((warning) => `${translateText("HIGH PRIORITY", input.language)} · ${warning.date}: ${translateText(warning.message, input.language)}`).join("\n\n"), { x: 0.4, y: 1.75, w: portrait ? 6.7 : 12, h: 5, fontFace: input.language === "ar" ? "Cairo" : "Arial", fontSize: portrait ? 10 : 16, color: "815C16", fill: { color: "FFF9E8" }, margin: 0.2, valign: "top", rtlMode: input.language === "ar" });
   }
+  const details = shiftDetailRows(reportAssignmentRows(input), input.language);
+  for (let offset = 0; offset < details.length; offset += 14) {
+    const slide = pptx.addSlide();
+    addPowerPointBrand(slide, { ...input, clinic, title: translateText("Assigned shifts and actual hours", input.language), range, orientation: input.orientation });
+    const header = ["Date", "Nurse", "Shift name", "Start time", "End time", "Total hours"].map((item) => translateText(item, input.language));
+    const detailRows = [header, ...details.slice(offset, offset + 14)].map((row, rowIndex) => row.map((value) => ({
+      text: String(value),
+      options: { fill: { color: rowIndex === 0 ? "176B9A" : "FFFFFF" }, color: rowIndex === 0 ? "FFFFFF" : "263A49", bold: rowIndex === 0, align: input.language === "ar" ? "right" as const : "center" as const, margin: 0.06 },
+    })));
+    const portrait = input.orientation === "portrait";
+    slide.addTable(detailRows, {
+      x: portrait ? 0.3 : 0.42, y: 1.68, w: portrait ? 6.62 : 12.48, h: portrait ? 7.65 : 5.2,
+      fontFace: input.language === "ar" ? "Cairo" : "Arial", fontSize: portrait ? 7 : 9,
+      border: { type: "solid", color: "D5E0E7", pt: 0.5 }, rowH: portrait ? 0.42 : 0.32, valign: "middle",
+    });
+  }
   await pptx.writeFile({ fileName: "nurse-scheduling-report.pptx" });
 }
 
@@ -379,7 +486,7 @@ export async function exportSchedule(input: ScheduleExportInput, format: ExportF
     return true;
   }
   if (format === "word") {
-    downloadFile("weekly-schedule.doc", renderScheduleExportDocument(input), "application/msword;charset=utf-8");
+    downloadFile(`${input.period ?? "weekly"}-schedule.doc`, renderScheduleExportDocument(input), "application/msword;charset=utf-8");
     return true;
   }
   await downloadPowerPointSchedule(input);

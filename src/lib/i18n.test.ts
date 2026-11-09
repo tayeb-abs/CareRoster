@@ -7,7 +7,7 @@ test("translates shared interface and dynamic labels into Arabic", () => {
   assert.equal(translateText("Friday", "ar"), "الجمعة");
   assert.equal(translateText("6 shifts this week", "ar"), "6 مناوبة هذا الأسبوع");
   assert.equal(translateText("4 nurses scheduled", "ar"), "4 ممرضين مجدولين");
-  assert.equal(translateText("10 hrs", "ar"), "١٠ ساعات");
+  assert.equal(translateText("hours", "ar"), "ساعات");
   assert.equal(translateText("Senior Nurse", "ar"), "ممرضة أولى");
   assert.equal(
     translateText("Two Senior Nurses are assigned on Friday. This violates the standard scheduling policy.", "ar"),

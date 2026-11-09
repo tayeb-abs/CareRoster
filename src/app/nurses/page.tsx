@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Check,
   CircleAlert,
+  ArrowDown,
+  ArrowUp,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -124,6 +126,7 @@ export default function NursesPage() {
   const [dialog, setDialog] = useState<Nurse | null | undefined>(undefined);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   const loadNurses = useCallback(async () => {
     try {
@@ -166,6 +169,27 @@ export default function NursesPage() {
     }
   };
 
+  const moveNurse = async (nurse: Nurse, offset: -1 | 1) => {
+    const currentIndex = nurses.findIndex((entry) => entry.id === nurse.id);
+    const targetIndex = currentIndex + offset;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= nurses.length || savingOrder) return;
+    const reordered = [...nurses];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    setSavingOrder(true);
+    try {
+      const result = await apiFetch<{ nurses: Nurse[] }>("/api/nurses/reorder", {
+        method: "PUT",
+        body: JSON.stringify({ nurseIds: reordered.map(({ id }) => id) }),
+      });
+      setNurses(result.nurses);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save the team order.");
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
   const visible = nurses.filter((nurse) => `${nurse.name} ${nurse.email ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   const activeCount = nurses.filter((nurse) => nurse.isActive).length;
 
@@ -185,15 +209,24 @@ export default function NursesPage() {
         <div className="nurse-list">
           <div className="nurse-list-head"><span>TEAM MEMBER</span><span>ROLE</span><span>NURSE LEVEL</span><span>CONTACT</span><span>STATUS</span><span>ACTIONS</span></div>
           {loading && <div className="table-state">Loading your care team…</div>}
-          {!loading && visible.map((nurse) => <div className={`nurse-list-row ${!nurse.isActive ? "nurse-inactive" : ""}`} key={nurse.id}>
+          {!loading && visible.map((nurse) => {
+            const nurseIndex = nurses.findIndex((entry) => entry.id === nurse.id);
+            return <div className={`nurse-list-row ${!nurse.isActive ? "nurse-inactive" : ""}`} key={nurse.id}>
             <div className="nurse-identity"><span className="avatar" style={{ backgroundColor: nurse.color }}>{initials(nurse.name)}</span><span><strong>{nurse.name}</strong><small>{nurse.isActive ? "Available for scheduling" : "Not assigned to new schedules"}</small></span></div>
             <span className="nurse-role">{nurse.title}</span><span className={`nurse-level-badge ${nurse.level === "SENIOR" ? "level-senior" : "level-regular"}`}>{nurse.level === "SENIOR" ? "⭐ Senior Nurse" : "Regular Nurse"}</span><span className="nurse-email">{nurse.email || <span className="muted">No email added</span>}</span>
             <span><span className={`status-pill ${nurse.isActive ? "status-active" : "status-inactive"}`}><i />{nurse.isActive ? "Active" : "Inactive"}</span></span>
-            <div className="nurse-actions"><button title="Edit nurse" onClick={() => setDialog(nurse)}><Pencil size={15} /></button><button title={nurse.isActive ? "Deactivate nurse" : "Activate nurse"} onClick={() => void updateNurse(nurse, { isActive: !nurse.isActive })}>{nurse.isActive ? <MoreHorizontal size={17} /> : <Check size={16} />}</button><button title="Remove nurse" className="action-danger" onClick={() => void deleteNurse(nurse)}><Trash2 size={15} /></button></div>
-          </div>)}
+            <div className="nurse-actions">
+              <button type="button" title={`Move ${nurse.name} up`} aria-label={`Move ${nurse.name} up`} disabled={savingOrder || query.length > 0 || nurseIndex === 0} onClick={() => void moveNurse(nurse, -1)}><ArrowUp size={15} /></button>
+              <button type="button" title={`Move ${nurse.name} down`} aria-label={`Move ${nurse.name} down`} disabled={savingOrder || query.length > 0 || nurseIndex === nurses.length - 1} onClick={() => void moveNurse(nurse, 1)}><ArrowDown size={15} /></button>
+              <button title="Edit nurse" onClick={() => setDialog(nurse)}><Pencil size={15} /></button>
+              <button title={nurse.isActive ? "Deactivate nurse" : "Activate nurse"} onClick={() => void updateNurse(nurse, { isActive: !nurse.isActive })}>{nurse.isActive ? <MoreHorizontal size={17} /> : <Check size={16} />}</button>
+              <button title="Remove nurse" className="action-danger" onClick={() => void deleteNurse(nurse)}><Trash2 size={15} /></button>
+            </div>
+          </div>;
+          })}
           {!loading && visible.length === 0 && <div className="table-state">No nurses match this search.</div>}
         </div>
-        <div className="list-footnote"><span><i className="tiny-dot" /> Active nurses are included in new schedules</span><span>Tip: deactivate a nurse when they’re temporarily unavailable.</span></div>
+        <div className="list-footnote"><span><i className="tiny-dot" /> Active nurses are included in new schedules</span><span>Move nurses up or down to set the order used in schedules and exports.</span></div>
       </section>
       {user?.role === "ADMIN" && <AccountForm onCreated={() => {}} />}
       {dialog !== undefined && <NurseDialog nurse={dialog} onClose={() => setDialog(undefined)} onSaved={() => void loadNurses()} />}

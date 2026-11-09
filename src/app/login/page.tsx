@@ -59,7 +59,22 @@ export default function LoginPage() {
         </form>
         <div className="login-note"><LockKeyhole size={15} /><span>Secure access for Admin and Head Nurse accounts</span></div>
       </div>
-      <div className="login-aside"><div className="login-aside-glow" /><div className="aside-copy"><span className="eyebrow">CARE, IN HARMONY</span><h2>Every shift, thoughtfully covered.</h2><p>One clear view of your schedule, your team, and the care that matters.</p><div className="aside-stats"><div><strong>10<span>h</span></strong><small>Per shift</small></div><i /><div><strong>5<span>days</span></strong><small>Weekly rhythm</small></div><i /><div><strong>1</strong><small>Team, together</small></div></div></div><div className="aside-footer">CA ROSTER · NURSE SCHEDULING</div></div>
+      <div className="login-aside">
+        <div className="login-aside-glow" />
+        <div className="aside-copy">
+          <span className="eyebrow">CARE, IN HARMONY</span>
+          <h2>Every shift, thoughtfully covered.</h2>
+          <p>One clear view of your schedule, your team, and the care that matters.</p>
+          <div className="aside-stats">
+            <div><strong>Custom</strong><small>Clinic-defined shifts</small></div>
+            <i />
+            <div><strong>Weekly</strong><small>Roster planning</small></div>
+            <i />
+            <div><strong>Fair</strong><small>Workload tracking</small></div>
+          </div>
+        </div>
+        <div className="aside-footer">CA ROSTER · NURSE SCHEDULING</div>
+      </div>
     </main></LocalizedContent>
   );
 }

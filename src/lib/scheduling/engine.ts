@@ -16,6 +16,15 @@ export type Assignment = {
   date: string;
   type: ShiftType;
   isManual: boolean;
+  isShiftManual?: boolean;
+  shiftAssignments?: {
+    shiftTemplateId: string;
+    shiftName: string;
+    startTime: string;
+    endTime: string;
+    color: string | null;
+    totalHours: number;
+  }[];
   exceptionApproved?: boolean;
   seniorFridayOverrideApproved?: boolean;
   overrideReason?: OverrideReason | null;
@@ -175,7 +184,7 @@ export function generateSchedule(input: {
   }
   const { start, end } = monthWeekRange(input.year, input.month);
   const overrides = input.overrides ?? [];
-  const fixed = new Map(overrides.filter((row) => row.isManual).map((row) => [key(row.nurseId, row.date), row]));
+  const fixed = new Map(overrides.filter((row) => row.isManual || row.isShiftManual).map((row) => [key(row.nurseId, row.date), row]));
   const output: Assignment[] = [];
   const history = [...(input.fridayHistory ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   const fridayCounts = new Map<string, number>();
@@ -335,6 +344,10 @@ export function summarizeSchedule(assignments: Assignment[], nurseIds: string[])
     return {
       nurseId,
       workingDays: rows.filter((row) => row.type === "WORK").length,
+      workingHours: rows.reduce(
+        (total, row) => total + (row.type === "WORK" ? (row.shiftAssignments ?? []).reduce((dayTotal, shift) => dayTotal + shift.totalHours, 0) : 0),
+        0,
+      ),
       fridayAssignments: rows.filter((row) => row.type === "WORK" && asDate(row.date).getUTCDay() === 5).length,
       offDays: rows.filter((row) => row.type === "OFF").length,
       leaveDays: rows.filter((row) => isLeave(row.type)).length,

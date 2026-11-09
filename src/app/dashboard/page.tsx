@@ -19,6 +19,7 @@ import { translateText } from "@/lib/i18n";
 import { useSession } from "@/components/session-provider";
 import { useLocale } from "@/components/locale-provider";
 import { apiFetch, initials, shortDate, type Assignment, type Nurse } from "@/lib/client-api";
+import { formatShiftTime } from "@/lib/shifts";
 
 type Overview = {
   month: { year: number; month: number };
@@ -31,9 +32,10 @@ type Overview = {
   totalNurseCount: number;
   workingToday: number;
   leaveDays: number;
+  totalScheduledHours: number;
   assignments: Assignment[];
   nurses: Nurse[];
-  fairness: { nurseId: string; workingDays: number; fridayAssignments: number; offDays: number; leaveDays: number }[];
+  fairness: { nurseId: string; workingDays: number; scheduledHours: number; fridayAssignments: number; offDays: number; leaveDays: number }[];
   seniorFridayWarnings: { id: string; date: string; priority: "HIGH"; message: string }[];
 };
 
@@ -97,7 +99,7 @@ export default function DashboardPage() {
         <MetricCard label="Active nurses" value={data?.activeNurseCount ?? "—"} detail={`${data?.totalNurseCount ?? 0} team profiles`} icon={UsersRound} tone="mint" />
         <MetricCard label="On duty today" value={data?.workingToday ?? "—"} detail={`${todayAssignments.length} shift entries today`} icon={CalendarCheck2} tone="blue" />
         <MetricCard label="Leave this month" value={data?.leaveDays ?? "—"} detail="Sick & emergency leave" icon={CalendarClock} tone="amber" />
-        <MetricCard label="Shift length" value="10 hrs" detail="Standard daily shift" icon={Clock3} tone="rose" />
+        <MetricCard label="Scheduled hours" value={data?.totalScheduledHours ?? "—"} detail="Actual assigned shift hours this month" icon={Clock3} tone="rose" />
         <MetricCard label="Total Senior Nurses" value={data?.seniorNurseCount ?? "—"} detail="Senior Nurse" icon={UsersRound} tone="amber" />
         <MetricCard label="Total Regular Nurses" value={data?.regularNurseCount ?? "—"} detail="Regular Nurse" icon={UsersRound} tone="blue" />
         <MetricCard label="Friday Senior Coverage" value={data?.fridaySeniorCoverage ?? "—"} detail="Senior Friday Assignments" icon={CalendarCheck2} tone="mint" />
@@ -109,7 +111,10 @@ export default function DashboardPage() {
           <div className="today-date"><span className="today-date-mark"><CalendarCheck2 size={17} /></span><strong>{today ? new Intl.DateTimeFormat(language, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${today}T00:00:00Z`)) : "Today"}</strong><span>{todayAssignments.filter((row) => row.type === "WORK").length} nurses scheduled</span></div>
           {todayAssignments.filter((row) => row.type === "WORK").slice(0, 5).map((row) => {
             const nurse = data?.nurses.find((entry) => entry.id === row.nurseId);
-            return <div key={row.nurseId} className="team-row"><span className="avatar" style={{ backgroundColor: nurse?.color }}>{initials(nurse?.name ?? "?")}</span><span className="team-name"><strong>{nurse?.name ?? "Nurse"}</strong><small>{nurse?.title ?? "Registered Nurse"}</small></span><span className="shift-time">07:00 — 17:00</span><span className="shift-pill shift-work">On duty</span></div>;
+            const shiftDetails = row.shiftAssignments?.length
+              ? row.shiftAssignments.map((shift) => `${shift.shiftName} · ${formatShiftTime(shift.startTime, language)}–${formatShiftTime(shift.endTime, language)}`).join(", ")
+              : translateText("Shift not assigned", language);
+            return <div key={row.nurseId} className="team-row"><span className="avatar" style={{ backgroundColor: nurse?.color }}>{initials(nurse?.name ?? "?")}</span><span className="team-name"><strong>{nurse?.name ?? "Nurse"}</strong><small>{shiftDetails}</small></span><span className="shift-pill shift-work">{translateText("On duty", language)}</span></div>;
           })}
           {data?.scheduleGenerated && todayAssignments.length === 0 && <div className="empty-inline">No shift entries for today.</div>}
           {!data?.scheduleGenerated && <div className="empty-inline">Generate this month’s schedule to see today’s team.</div>}
@@ -118,11 +123,11 @@ export default function DashboardPage() {
 
         <article className="panel balance-panel">
           <div className="panel-heading"><div><span className="eyebrow">TEAM PULSE</span><h2>Workload at a glance</h2></div><span className="soft-icon"><Sparkles size={16} /></span></div>
-          <p className="panel-intro">Scheduled working days this month by nurse.</p>
+          <p className="panel-intro">{translateText("Scheduled working hours this month by nurse.", language)}</p>
           {data?.fairness.filter((row) => data.nurses.some((nurse) => nurse.id === row.nurseId)).slice(0, 5).map((stat) => {
             const nurse = data.nurses.find((entry) => entry.id === stat.nurseId)!;
-            const maxDays = Math.max(1, ...data.fairness.map((entry) => entry.workingDays));
-            return <div className="balance-row" key={stat.nurseId}><span className="avatar avatar-small" style={{ backgroundColor: nurse.color }}>{initials(nurse.name)}</span><span className="balance-name">{nurse.name.split(" ")[0]}</span><div className="progress-track"><span style={{ width: `${Math.min(100, (stat.workingDays / maxDays) * 100)}%`, backgroundColor: nurse.color }} /></div><strong>{stat.workingDays}<small> days</small></strong></div>;
+            const maxHours = Math.max(1, ...data.fairness.map((entry) => entry.scheduledHours));
+            return <div className="balance-row" key={stat.nurseId}><span className="avatar avatar-small" style={{ backgroundColor: nurse.color }}>{initials(nurse.name)}</span><span className="balance-name">{nurse.name.split(" ")[0]}</span><div className="progress-track"><span style={{ width: `${Math.min(100, (stat.scheduledHours / maxHours) * 100)}%`, backgroundColor: nurse.color }} /></div><strong>{stat.scheduledHours}<small> {translateText("hours", language)}</small></strong></div>;
           })}
           {!data?.scheduleGenerated && <div className="empty-inline">Your fairness snapshot appears after schedule generation.</div>}
           <Link href="/reports" className="panel-footer-link">See fairness report <ArrowRight size={14} /></Link>

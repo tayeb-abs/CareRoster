@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   try {
     const nurses = await db.nurse.findMany({
       where: { deletedAt: null },
-      orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
     });
     return NextResponse.json({ nurses });
   } catch (error) {
@@ -33,12 +33,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Provide a nurse name and valid profile details." }, { status: 400 });
   }
   try {
-    const nurse = await db.nurse.create({
-      data: {
-        ...parsed.data,
-        email: parsed.data.email?.trim().toLowerCase() || null,
-        createdById: user.id,
-      },
+    const nurse = await db.$transaction(async (transaction) => {
+      const lastNurse = await transaction.nurse.findFirst({
+        where: { deletedAt: null },
+        orderBy: [{ sortOrder: "desc" }, { id: "desc" }],
+        select: { sortOrder: true },
+      });
+      return transaction.nurse.create({
+        data: {
+          ...parsed.data,
+          sortOrder: (lastNurse?.sortOrder ?? -1) + 1,
+          email: parsed.data.email?.trim().toLowerCase() || null,
+          createdById: user.id,
+        },
+      });
     });
     return NextResponse.json({ nurse }, { status: 201 });
   } catch (error) {

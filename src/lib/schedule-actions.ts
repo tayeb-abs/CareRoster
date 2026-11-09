@@ -4,12 +4,24 @@ export type ScheduleChange = {
   nurseId: string;
   date: string;
   type: "WORK" | "OFF" | "SICK" | "EMERGENCY";
+  shiftId?: string;
   overrideReason: string;
   note?: string;
   moveFrom?: string;
   clearOverride?: boolean;
   confirmed?: boolean;
 };
+
+export async function saveAssignmentShifts(
+  nurseId: string,
+  date: string,
+  shiftIds: string[],
+) {
+  return apiFetch<{ success: boolean }>("/api/schedules/assignments/shift", {
+    method: "PATCH",
+    body: JSON.stringify({ nurseId, date, shiftIds }),
+  });
+}
 
 type ViolationResponse = {
   requiresConfirmation?: boolean;

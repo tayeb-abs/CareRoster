@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const { start, end } = dateRange(year, month);
     const [schedule, nurses, seniorFridayWarnings] = await Promise.all([
       getMonthlySchedule(year, month),
-      db.nurse.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" } }),
+      db.nurse.findMany({ where: { deletedAt: null }, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] }),
       db.scheduleAuditLog.findMany({
         where: {
           date: { gte: start, lte: end },
@@ -35,6 +35,11 @@ export async function GET(request: Request) {
       toEngineAssignments(monthRows),
       nurses.map((nurse) => nurse.id),
     );
+    const hoursByNurse = new Map<string, number>();
+    for (const assignment of monthRows) {
+      const hours = (assignment.shiftAssignments ?? []).reduce((total, shift) => total + Number(shift.totalHours), 0);
+      hoursByNurse.set(assignment.nurseId, (hoursByNurse.get(assignment.nurseId) ?? 0) + hours);
+    }
     return NextResponse.json({
       month: { year, month },
       today,
@@ -48,10 +53,11 @@ export async function GET(request: Request) {
       totalNurseCount: nurses.length,
       workingToday: workingToday.length,
       leaveDays: leaveRows.length,
+      totalScheduledHours: [...hoursByNurse.values()].reduce((total, hours) => total + hours, 0),
       scheduleDays: new Set(monthRows.map((row) => row.date)).size,
       assignments: monthRows,
       nurses: activeNurses,
-      fairness,
+      fairness: fairness.map((row) => ({ ...row, scheduledHours: row.workingHours })),
       seniorFridayWarnings: seniorFridayWarnings.map((warning) => ({
         id: warning.id,
         date: warning.date ? warning.date.toISOString().slice(0, 10) : "",
