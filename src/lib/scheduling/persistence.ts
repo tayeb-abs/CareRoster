@@ -317,12 +317,12 @@ export async function saveMonthlySchedule(
   });
 }
 
-export async function getMonthlySchedule(year: number, month: number) {
+export async function getMonthlySchedule(year: number, month: number, includeArchived = false) {
   const period = await db.monthlySchedule.findUnique({ where: { year_month: { year, month } } });
-  if (!period) return null;
+  if (!period || (period.archivedAt && !includeArchived)) return null;
   const { start, end } = dateRange(year, month);
   const assignments = await db.schedule.findMany({
-    where: { date: { gte: start, lte: end } },
+    where: { monthlyScheduleId: period.id, date: { gte: start, lte: end } },
     include: {
       nurse: { select: { id: true, name: true, color: true, isActive: true, level: true, sortOrder: true } },
       shiftAssignments: true,
@@ -334,6 +334,7 @@ export async function getMonthlySchedule(year: number, month: number) {
     year: period.year,
     month: period.month,
     generatedAt: period.generatedAt,
+    archivedAt: period.archivedAt,
     assignments: assignments.map((row) => ({
       ...row,
       date: dateString(row.date),

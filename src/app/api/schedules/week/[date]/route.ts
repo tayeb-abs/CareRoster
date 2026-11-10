@@ -22,7 +22,7 @@ export async function GET(request: Request, context: RouteContext) {
   try {
     const [assignments, nurses, seniorFridayWarnings] = await Promise.all([
       db.schedule.findMany({
-        where: { date: { gte: start, lte: end } },
+        where: { date: { gte: start, lte: end }, monthlySchedule: { archivedAt: null } },
         include: {
           nurse: { select: { id: true, name: true, color: true, isActive: true, level: true, sortOrder: true } },
           shiftAssignments: true,
@@ -34,6 +34,7 @@ export async function GET(request: Request, context: RouteContext) {
         where: {
           date: { gte: start, lte: end },
           action: { in: ["SENIOR_FRIDAY_EXCEPTION", "SENIOR_FRIDAY_POLICY_OVERRIDE"] },
+          monthlySchedule: { archivedAt: null },
         },
         select: { id: true, date: true, action: true },
         orderBy: { date: "asc" },

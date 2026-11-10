@@ -140,8 +140,8 @@ function renderDocument(
           .document-footer { display: none; }
           @page { size: ${period === "monthly" && orientation === "landscape" ? "A3" : "A4"} ${orientation}; margin: 8mm; }
           @media print {
-            body { padding: 45mm 0 10mm; }
-            .document-header { position: fixed; top: 0; left: 0; right: 0; background: #fff; z-index: 10; }
+            body { padding: 0 0 10mm; }
+            .document-header { position: static; }
             .document-footer { display: block; position: fixed; right: 0; bottom: -3mm; left: 0; padding-top: 2mm; border-top: 1px solid #d5e0e7; color: #71818c; background: #fff; text-align: center; font-size: 8pt; }
             .document-footer::after { content: counter(page) " / " counter(pages); }
             .monthly-roster th, .monthly-roster td { padding: 2px 1px; font-size: 6.5pt; }

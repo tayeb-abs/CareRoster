@@ -10,6 +10,7 @@ const updateSchema = z.object({
   level: z.enum(["SENIOR", "REGULAR"]).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   isActive: z.boolean().optional(),
+  defaultShiftId: z.uuid().nullable().optional(),
 });
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -23,6 +24,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
   try {
     const { id } = await context.params;
+    if (parsed.data.defaultShiftId) {
+      const shift = await db.shiftTemplate.findFirst({
+        where: { id: parsed.data.defaultShiftId, isActive: true },
+        select: { id: true },
+      });
+      if (!shift) return NextResponse.json({ error: "Select an active default shift." }, { status: 400 });
+    }
     const nurse = await db.nurse.update({
       where: { id },
       data: {

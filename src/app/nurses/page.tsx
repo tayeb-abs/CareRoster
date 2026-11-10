@@ -19,10 +19,13 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { LocalizedContent } from "@/components/locale-provider";
 import { useSession } from "@/components/session-provider";
-import { apiFetch, initials, type Nurse } from "@/lib/client-api";
+import { apiFetch, initials, type Nurse, type ShiftTemplate } from "@/lib/client-api";
+import { formatShiftTime } from "@/lib/shifts";
+import { useLocale } from "@/components/locale-provider";
+import { translateText } from "@/lib/i18n";
 
-type NurseFormValue = { name: string; email: string; title: string; level: Nurse["level"]; color: string };
-const emptyForm: NurseFormValue = { name: "", email: "", title: "Registered Nurse", level: "REGULAR", color: "#2c9c84" };
+type NurseFormValue = { name: string; email: string; title: string; level: Nurse["level"]; color: string; defaultShiftId: string };
+const emptyForm: NurseFormValue = { name: "", email: "", title: "Registered Nurse", level: "REGULAR", color: "#2c9c84", defaultShiftId: "" };
 const colors = ["#2c9c84", "#6584dc", "#ca8d54", "#bc6d81", "#7d71ba", "#4b8da4"];
 
 function NurseDialog({
@@ -34,11 +37,28 @@ function NurseDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { language } = useLocale();
   const [form, setForm] = useState<NurseFormValue>(
-    nurse ? { name: nurse.name, email: nurse.email ?? "", title: nurse.title, level: nurse.level, color: nurse.color } : emptyForm,
+    nurse ? { name: nurse.name, email: nurse.email ?? "", title: nurse.title, level: nurse.level, color: nurse.color, defaultShiftId: nurse.defaultShiftId ?? "" } : emptyForm,
   );
+  const [shifts, setShifts] = useState<ShiftTemplate[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ shifts: ShiftTemplate[] }>("/api/shifts")
+      .then(({ shifts: rows }) => {
+        const active = rows.filter((shift) => shift.isActive);
+        setShifts(active);
+        if (!nurse?.defaultShiftId || !active.some((shift) => shift.id === nurse.defaultShiftId)) {
+          setForm((current) => ({
+            ...current,
+            defaultShiftId: active.find((shift) => shift.isDefault)?.id ?? active[0]?.id ?? "",
+          }));
+        }
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load active shifts."));
+  }, [nurse]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -47,7 +67,7 @@ function NurseDialog({
     try {
       await apiFetch(nurse ? `/api/nurses/${nurse.id}` : "/api/nurses", {
         method: nurse ? "PATCH" : "POST",
-        body: JSON.stringify({ ...form, email: form.email || "" }),
+        body: JSON.stringify({ ...form, email: form.email || "", defaultShiftId: form.defaultShiftId || null }),
       });
       onSaved();
       onClose();
@@ -69,6 +89,7 @@ function NurseDialog({
         <label className="field-label">Work email <span className="field-optional">OPTIONAL</span><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="maya@medicalcenter.com" /></label>
         <label className="field-label">Role / title<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} maxLength={80} required /></label>
         <label className="field-label">Nurse Level<select value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value as Nurse["level"] })}><option value="SENIOR">Senior Nurse</option><option value="REGULAR">Regular Nurse</option></select></label>
+        <label className="field-label">{translateText("Default shift", language)}<select value={form.defaultShiftId} onChange={(event) => setForm({ ...form, defaultShiftId: event.target.value })} required={shifts.length > 0} disabled={!shifts.length}><option value="">{translateText("Select a default shift", language)}</option>{shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name} · {formatShiftTime(shift.startTime, language)}–{formatShiftTime(shift.endTime, language)}</option>)}</select></label>
         <div className="field-label">Profile color<div className="color-options">{colors.map((color) => <button key={color} type="button" aria-label={`Choose ${color}`} className={`color-option ${form.color === color ? "color-selected" : ""}`} style={{ backgroundColor: color }} onClick={() => setForm({ ...form, color })}>{form.color === color && <Check size={14} />}</button>)}</div></div>
         {error && <div className="form-error">{error}</div>}
         <div className="dialog-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={saving}>{saving ? "Saving…" : nurse ? "Save changes" : "Add nurse"}</button></div>
@@ -120,6 +141,7 @@ function AccountForm({ onCreated }: { onCreated: () => void }) {
 
 export default function NursesPage() {
   const { user, ready } = useSession();
+  const { language } = useLocale();
   const userId = user?.id;
   const [nurses, setNurses] = useState<Nurse[]>([]);
   const [query, setQuery] = useState("");
@@ -212,7 +234,7 @@ export default function NursesPage() {
           {!loading && visible.map((nurse) => {
             const nurseIndex = nurses.findIndex((entry) => entry.id === nurse.id);
             return <div className={`nurse-list-row ${!nurse.isActive ? "nurse-inactive" : ""}`} key={nurse.id}>
-            <div className="nurse-identity"><span className="avatar" style={{ backgroundColor: nurse.color }}>{initials(nurse.name)}</span><span><strong>{nurse.name}</strong><small>{nurse.isActive ? "Available for scheduling" : "Not assigned to new schedules"}</small></span></div>
+            <div className="nurse-identity"><span className="avatar" style={{ backgroundColor: nurse.color }}>{initials(nurse.name)}</span><span><strong>{nurse.name}</strong><small>{nurse.isActive ? "Available for scheduling" : "Not assigned to new schedules"}</small><small>{translateText("Default shift", language)}: {nurse.defaultShift ? `${nurse.defaultShift.name} · ${formatShiftTime(nurse.defaultShift.startTime, language)}–${formatShiftTime(nurse.defaultShift.endTime, language)}` : translateText("Not configured", language)}</small></span></div>
             <span className="nurse-role">{nurse.title}</span><span className={`nurse-level-badge ${nurse.level === "SENIOR" ? "level-senior" : "level-regular"}`}>{nurse.level === "SENIOR" ? "⭐ Senior Nurse" : "Regular Nurse"}</span><span className="nurse-email">{nurse.email || <span className="muted">No email added</span>}</span>
             <span><span className={`status-pill ${nurse.isActive ? "status-active" : "status-inactive"}`}><i />{nurse.isActive ? "Active" : "Inactive"}</span></span>
             <div className="nurse-actions">

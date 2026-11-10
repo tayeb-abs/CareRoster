@@ -40,7 +40,9 @@ Use Move Up/Move Down on **Nurses** to set the saved team order. That order is u
 
 Administrators can configure both clinic names, upload a PNG/JPEG logo, and set address, phone, department, and Head Nurse name at **Clinic profile**. Profile details are stored in PostgreSQL and included in generated PDF, Word, Excel, and PowerPoint documents. The design uses an Evercare-inspired medical-blue palette; the provided application does not include an attached logo image, so upload the approved clinic logo in the profile settings.
 
-Administrators create and manage all shift templates at **Shift management**. Each template has a name, start time, end time, optional color, and active state; one active template can be selected as the default. Times are entered by the administrator, including overnight shifts. Generation assigns the selected/default template to generated workdays. Changing a shift on an existing working day updates only that nurse/date assignment; it does not regenerate the schedule. Schedule rows retain a snapshot of the assigned shift name, times, color, and hours, so later template edits do not rewrite historical rosters. The assignment model supports multiple shift rows per day for future split-shift workflows.
+Administrators create and manage all shift templates at **Shift management**. Each template has a name, start time, end time, optional color, and active state; one active template can be selected as the system fallback. Each nurse also has an independent default shift in their profile. Generation uses each nurse's configured default, falling back to the system default only when that nurse has no active default. Changing a shift on an existing working day updates only that nurse/date assignment and never changes the nurse's default. Schedule rows retain a snapshot of the assigned shift name, times, color, and hours, so later template edits do not rewrite historical rosters. The assignment model supports multiple shift rows per day for future split-shift workflows.
+
+Administrators can use **Schedule management** to clear one month, a date range, or all schedule history, or archive a month. Clearing all history requires the administrator's password and an additional acknowledgement; cleanup actions are retained in a separate audit log. Head Nurses can view this cleanup history but cannot run maintenance actions. Archived schedules are hidden from active rosters while remaining available in reports and exports.
 
 The seed creates the `ADMIN` and `HEAD_NURSE` roles and the two login accounts below. It does not create nurses or schedules, so you can enter your clinic's actual data:
 
@@ -66,9 +68,9 @@ Create future migrations in development with `npx prisma migrate dev --name desc
 
 - `Role` has a one-to-many relationship with `User`.
 - `User` has a required role, self-referential creator/updater relationships, and creator relationships to nurses, schedules, exceptions, overrides, and Friday history.
-- `Nurse` owns schedule entries, exceptions, overrides, audit references, and Friday-assignment history; its persisted `sortOrder` controls roster display and export order.
+- `Nurse` owns schedule entries, exceptions, overrides, audit references, and Friday-assignment history; its persisted `sortOrder` controls roster display and export order, and its optional `defaultShiftId` controls generated workday shifts.
 - `Nurse.level` is a `NurseLevel` enum (`SENIOR` or `REGULAR`) defaulting to `REGULAR`; adding a level requires only extending this enum and the level-specific rule.
-- `MonthlySchedule` is unique by year/month and owns its schedule, exception, override, audit, and Friday-history records.
+- `MonthlySchedule` is unique by year/month and owns its schedule, exception, override, audit, and Friday-history records; archived months remain stored but are excluded from active schedules.
 - `ClinicProfile` stores the clinic's English/Arabic names, logo, contact information, department, Head Nurse, and the admin account that last updated the profile.
 - `Schedule` links one nurse and one monthly schedule to a date. A unique nurse/date constraint prevents duplicate daily assignments. Its exceptions and overrides cascade on schedule deletion; nurses are restricted from hard deletion so history is retained.
 - `ShiftTemplate` stores administrator-defined names, times, colors, active status, and the optional default template. A partial unique index allows at most one default, and database checks validate time and color formats.
@@ -78,6 +80,7 @@ Create future migrations in development with `npx prisma migrate dev --name desc
 - `ManualOverride` records each manual change and the prior/new shift, reason, note, author, and whether that override is active.
 - `ScheduleAuditLog` records generation and manual-override changes; deleting related schedule records preserves the log with nullable foreign keys.
 - `FridayAssignmentHistory` records assignments (including non-assignments) per nurse/date and supports rotation fairness.
+- `ScheduleCleanupAudit` permanently records cleanup and archive actions, including actor, timestamp, action, affected period, and affected-record counts.
 
 All operational entities include creation/update timestamps. User-entered entities have nullable `createdById`/`updatedById` references where applicable, with `SET NULL` on user deletion; child schedule data cascades from its monthly schedule. Reporting, month/year, nurse/date, shift/date, and audit-time indexes are part of the initial migration.
 

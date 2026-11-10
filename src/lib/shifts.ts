@@ -6,6 +6,14 @@ export type ShiftDefinition = {
   color: string | null;
 };
 
+export function getNurseDefaultShift<T extends ShiftDefinition>(
+  defaultShiftId: string | null | undefined,
+  activeShifts: readonly T[],
+  fallback?: T | null,
+) {
+  return activeShifts.find((shift) => shift.id === defaultShiftId) ?? fallback ?? null;
+}
+
 export function shiftDurationHours(startTime: string, endTime: string) {
   const toMinutes = (value: string) => {
     const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);

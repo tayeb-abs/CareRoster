@@ -19,10 +19,14 @@ export async function PATCH(request: Request) {
     const { nurseId, date: dateValue, shiftIds } = parsed.data;
     const date = new Date(`${dateValue}T00:00:00.000Z`);
     const [schedule, templates] = await Promise.all([
-      db.schedule.findUnique({ where: { nurseId_date: { nurseId, date } }, include: { shiftAssignments: true } }),
+      db.schedule.findUnique({
+        where: { nurseId_date: { nurseId, date } },
+        include: { shiftAssignments: true, monthlySchedule: { select: { archivedAt: true } } },
+      }),
       db.shiftTemplate.findMany({ where: { id: { in: shiftIds }, isActive: true } }),
     ]);
     if (!schedule) return NextResponse.json({ error: "Generate or add this nurse's working assignment before changing its shift." }, { status: 404 });
+    if (schedule.monthlySchedule.archivedAt) return NextResponse.json({ error: "Archived schedules cannot be changed." }, { status: 409 });
     if (schedule.shiftType !== "WORK") return NextResponse.json({ error: "Only working assignments can have shifts." }, { status: 400 });
     if (templates.length !== shiftIds.length) return NextResponse.json({ error: "One or more selected shifts are inactive or unavailable." }, { status: 400 });
     const selected = shiftIds.map((id) => templates.find((template) => template.id === id)!);

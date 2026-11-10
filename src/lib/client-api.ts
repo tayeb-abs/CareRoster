@@ -35,6 +35,8 @@ export type Nurse = {
   title: string;
   level: "SENIOR" | "REGULAR";
   color: string;
+  defaultShiftId?: string | null;
+  defaultShift?: Pick<ShiftTemplate, "id" | "name" | "startTime" | "endTime"> | null;
   isActive: boolean;
   deletedAt?: string | null;
 };

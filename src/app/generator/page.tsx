@@ -1,35 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CalendarDays, Check, CircleAlert, Clock3, HeartHandshake, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { useLocale } from "@/components/locale-provider";
-import { useSession } from "@/components/session-provider";
 import { useCurrentPeriod } from "@/components/use-current-period";
-import { apiFetch, monthLabel, type ShiftTemplate } from "@/lib/client-api";
-import { formatShiftTime } from "@/lib/shifts";
+import { apiFetch, monthLabel } from "@/lib/client-api";
 import { translateText } from "@/lib/i18n";
 
 export default function GeneratorPage() {
   const { month, setMonth, error: periodError } = useCurrentPeriod();
   const { language } = useLocale();
-  const { user } = useSession();
   const [state, setState] = useState<"idle" | "generating" | "done">("idle");
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<{ assignments: number; violations: number } | null>(null);
-  const [shifts, setShifts] = useState<ShiftTemplate[]>([]);
-  const [shiftId, setShiftId] = useState("");
+  const appliedRequestedMonth = useRef(false);
 
   useEffect(() => {
-    apiFetch<{ shifts: ShiftTemplate[] }>("/api/shifts")
-      .then(({ shifts: rows }) => {
-        const active = rows.filter((shift) => shift.isActive);
-        setShifts(active);
-        setShiftId(active.find((shift) => shift.isDefault)?.id ?? active[0]?.id ?? "");
-      })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load active shifts."));
-  }, []);
+    if (!month || appliedRequestedMonth.current) return;
+    appliedRequestedMonth.current = true;
+    const requestedMonth = new URLSearchParams(window.location.search).get("month");
+    if (!requestedMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) return;
+    const [year, monthNumber] = requestedMonth.split("-").map(Number);
+    setMonth(new Date(Date.UTC(year, monthNumber - 1, 1)));
+  }, [month, setMonth]);
 
   const generate = async () => {
     if (!month) return;
@@ -38,7 +33,7 @@ export default function GeneratorPage() {
     try {
       const result = await apiFetch<{ schedule: { length?: number } | unknown[]; violations: unknown[] }>(
         `/api/schedules/${month.getFullYear()}/${month.getMonth() + 1}`,
-        { method: "PUT", body: JSON.stringify({ shiftId }) },
+        { method: "PUT", body: JSON.stringify({}) },
       );
       const scheduleRows = Array.isArray(result.schedule) ? result.schedule : [];
       setSummary({ assignments: scheduleRows.length, violations: result.violations.length });
@@ -59,9 +54,8 @@ export default function GeneratorPage() {
             <h2>Better balance.<br /><span>Less busywork.</span></h2>
             <p>Build a fair, ready-to-share schedule for your whole care team. Your manual overrides stay exactly where you put them.</p>
             <label className="field-label generator-month-label">Schedule month<input type="month" value={month ? `${month.getUTCFullYear()}-${String(month.getUTCMonth() + 1).padStart(2, "0")}` : ""} onChange={(event) => { const [year, monthNumber] = event.target.value.split("-").map(Number); setMonth(new Date(Date.UTC(year, monthNumber - 1, 1))); setState("idle"); }} /></label>
-            <label className="field-label generator-month-label">{translateText("Default shift for generated workdays", language)}<select value={shiftId} onChange={(event) => setShiftId(event.target.value)} disabled={!shifts.length}><option value="">{translateText("Select a shift", language)}</option>{shifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.name} · {formatShiftTime(shift.startTime, language)}–{formatShiftTime(shift.endTime, language)} · {shift.totalHours} {translateText("hours", language)}</option>)}</select></label>
-            {!shifts.length && <div className="notice notice-error"><CircleAlert size={17} />{translateText("Create an active shift before generating a schedule.", language)} {user?.role === "ADMIN" && <Link href="/settings/shifts">{translateText("Manage shifts", language)}</Link>}</div>}
-            <button className="button button-primary button-generate" onClick={() => void generate()} disabled={state === "generating" || !month || !shiftId}><Sparkles size={17} />{state === "generating" ? translateText("Balancing your schedule…", language) : state === "done" ? translateText("Regenerate schedule", language) : translateText("Generate monthly schedule", language)}{state !== "generating" && <ArrowRight size={16} />}</button>
+            <div className="generator-default-shift">{translateText("Each nurse's configured default shift is used for generated workdays. Configure defaults in nurse profiles.", language)} <Link href="/nurses">{translateText("Manage nurse defaults", language)}</Link></div>
+            <button className="button button-primary button-generate" onClick={() => void generate()} disabled={state === "generating" || !month}><Sparkles size={17} />{state === "generating" ? translateText("Balancing your schedule…", language) : state === "done" ? translateText("Regenerate schedule", language) : translateText("Generate monthly schedule", language)}{state !== "generating" && <ArrowRight size={16} />}</button>
             {(error || periodError) && <div className="notice notice-error"><CircleAlert size={17} />{error || periodError}</div>}
             {state === "done" && <div className="notice notice-success"><Check size={17} />Schedule ready — {summary?.assignments} shift entries generated{summary?.violations ? ` with ${summary.violations} rule warning(s)` : " with all scheduling rules met"}.</div>}
           </article>

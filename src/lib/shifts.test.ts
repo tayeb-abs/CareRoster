@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildWeeklyRoster } from "@/lib/roster-export";
-import { formatShiftTime, shiftDurationHours } from "@/lib/shifts";
+import { formatShiftTime, getNurseDefaultShift, shiftDurationHours } from "@/lib/shifts";
+
+test("resolves each nurse's configured shift ahead of the system fallback", () => {
+  const early = { id: "early", name: "Early", startTime: "07:00", endTime: "15:00", color: null };
+  const late = { id: "late", name: "Late", startTime: "11:00", endTime: "21:00", color: null };
+  assert.equal(getNurseDefaultShift("late", [early, late], early), late);
+  assert.equal(getNurseDefaultShift(null, [early, late], early), early);
+  assert.equal(getNurseDefaultShift("missing", [early, late]), null);
+});
 
 test("calculates administrator-defined daytime and overnight shift durations", () => {
   assert.equal(shiftDurationHours("08:00", "16:00"), 8);

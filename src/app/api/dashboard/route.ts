@@ -19,6 +19,7 @@ export async function GET(request: Request) {
         where: {
           date: { gte: start, lte: end },
           action: { in: ["SENIOR_FRIDAY_EXCEPTION", "SENIOR_FRIDAY_POLICY_OVERRIDE"] },
+          monthlySchedule: { archivedAt: null },
         },
         select: { id: true, date: true, action: true, newValue: true },
         orderBy: { date: "asc" },

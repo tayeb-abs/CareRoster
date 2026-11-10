@@ -55,7 +55,8 @@ test("renders Arabic schedule exports with RTL metadata, translated labels, and 
   assert.match(html, /@page \{ size: A4 portrait/);
   assert.match(html, /shift-work/);
   assert.doesNotMatch(html, /shift-manual|roster-manual|Manual override/);
-  assert.match(html, /position: fixed/);
+  assert.match(html, /\.document-header \{ position: static; \}/);
+  assert.match(html, /body \{ padding: 0 0 10mm; \}/);
   assert.match(html, /counter\(page\)/);
   assert.match(html, /display: table-header-group/);
   assert.match(html, /⭐/);
@@ -148,6 +149,11 @@ test("renders an export-only weekly matrix with seven Saturday-to-Friday columns
   assert.match(html, /shift-sick/);
   assert.match(html, /shift-work/);
   assert.match(html, /friday-cell/);
+  const headings = html.match(/<thead><tr>.*?<\/tr><\/thead>/)?.[0] ?? "";
+  assert.match(headings, /<th>Nurse<\/th>/);
+  for (const label of ["Sat 11/7", "Sun 11/8", "Mon 11/9", "Tue 11/10", "Wed 11/11", "Thu 11/12", "Fri 11/13"]) {
+    assert.ok(headings.includes(label), `Expected printed roster heading "${label}".`);
+  }
   assert.equal((html.match(/<th class="/g) ?? []).length, 7);
 });
 

@@ -41,7 +41,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (!month) return;
-    apiFetch<ScheduleSummary>(`/api/schedules/${year}/${monthNumber}`)
+    apiFetch<ScheduleSummary>(`/api/schedules/${year}/${monthNumber}?includeArchived=true`)
       .then(setData)
       .catch((reason) => setError(reason.message));
   }, [year, monthNumber, month]);

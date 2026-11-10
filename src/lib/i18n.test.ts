@@ -4,6 +4,11 @@ import { monthName, translateText } from "./i18n";
 
 test("translates shared interface and dynamic labels into Arabic", () => {
   assert.equal(translateText("Weekly schedule", "ar"), "الجدول الأسبوعي");
+  assert.equal(translateText("Schedule management", "ar"), "إدارة الجداول");
+  assert.equal(
+    translateText("Are you sure you want to clear all schedules for", "ar"),
+    "هل أنت متأكد من حذف جميع جداول شهر",
+  );
   assert.equal(translateText("Friday", "ar"), "الجمعة");
   assert.equal(translateText("6 shifts this week", "ar"), "6 مناوبة هذا الأسبوع");
   assert.equal(translateText("4 nurses scheduled", "ar"), "4 ممرضين مجدولين");

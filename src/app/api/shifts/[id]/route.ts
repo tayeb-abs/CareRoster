@@ -29,6 +29,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!next.isActive && next.isDefault) {
       return NextResponse.json({ error: "Choose another default shift before deactivating this one." }, { status: 400 });
     }
+    if (parsed.data.isActive === false) {
+      const assignedNurses = await db.nurse.count({ where: { defaultShiftId: id } });
+      if (assignedNurses) {
+        return NextResponse.json({ error: "Reassign this default shift for every nurse before deactivating it." }, { status: 400 });
+      }
+    }
     shiftDurationHours(next.startTime, next.endTime);
     const updated = await db.$transaction(async (transaction) => {
       if (parsed.data.isDefault) {
